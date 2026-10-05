@@ -1,58 +1,135 @@
 from datetime import datetime
+from bson import ObjectId
 from werkzeug.security import generate_password_hash, check_password_hash
-from . import db
+from .db import get_db, safe_object_id
 
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    email = db.Column(db.String(255), unique=True, nullable=False, index=True)
-    name = db.Column(db.String(120), default="")
-    role = db.Column(db.String(20), default="user")  # user | admin
-    password_hash = db.Column(db.String(255), nullable=False)
+class User:
+    def __init__(self, email, password_hash=None, name="", role="user", _id=None):
+        self.email = str(email).strip().lower()
+        self.password_hash = password_hash
+        self.name = name or ""
+        self.role = role or "user"
+        if _id:
+            self._id = safe_object_id(_id)
+            self.id = str(self._id)
+        else:
+            self._id = ObjectId()
+            self.id = str(self._id)
 
-    def set_password(self, pw): self.password_hash = generate_password_hash(pw)
-    def check_password(self, pw): return check_password_hash(self.password_hash, pw)
-    def to_dict(self): return {"id": self.id, "email": self.email, "name": self.name, "role": self.role}
+    def set_password(self, pw):
+        self.password_hash = generate_password_hash(pw)
 
-class PrintJob(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
-    printer = db.Column(db.String(255), nullable=False)
-    copies = db.Column(db.Integer, default=1)
-    paper = db.Column(db.String(20), default="A4")
-    orientation = db.Column(db.String(20), default="portrait")
-    color = db.Column(db.Boolean, default=False)
-    duplex = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
-    items = db.relationship("PrintItem", backref="job", cascade="all, delete-orphan", order_by="PrintItem.position")
-
-    @property
-    def status(self):
-        s = {i.status for i in self.items}
-        if not s: return "queued"
-        if s & {"queued", "processing"}: return "processing" if s & {"processing"} or len(s) > 1 else "queued"
-        if s == {"cancelled"}: return "cancelled"
-        if "failed" in s: return "failed"
-        return "completed"
-
-    def to_dict(self, with_items=True):
-        d = {"id": self.id, "printer": self.printer, "copies": self.copies, "paper": self.paper,
-             "orientation": self.orientation, "color": self.color, "duplex": self.duplex,
-             "status": self.status, "created_at": self.created_at.isoformat(),
-             "total_pages": sum(i.pages for i in self.items) * self.copies}
-        if with_items: d["items"] = [i.to_dict() for i in self.items]
-        return d
-
-class PrintItem(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    job_id = db.Column(db.Integer, db.ForeignKey("print_job.id"), nullable=False, index=True)
-    position = db.Column(db.Integer, default=0)
-    name = db.Column(db.String(255), nullable=False, index=True)
-    pages = db.Column(db.Integer, default=1)
-    size = db.Column(db.Integer, default=0)
-    status = db.Column(db.String(20), default="queued", index=True)  # queued|processing|completed|failed|cancelled
-    error = db.Column(db.Text)
-    finished_at = db.Column(db.DateTime)
+    def check_password(self, pw):
+        return check_password_hash(self.password_hash, pw)
 
     def to_dict(self):
-        return {"id": self.id, "name": self.name, "pages": self.pages, "size": self.size, "status": self.status,
-                "error": self.error, "finished_at": self.finished_at.isoformat() if self.finished_at else None}
+        return {
+            "id": self.id,
+            "email": self.email,
+            "name": self.name,
+            "role": self.role
+        }
+
+    def save(self):
+        db = get_db()
+        doc = {
+            "_id": self._id,
+            "email": self.email,
+            "name": self.name,
+            "role": self.role,
+            "password_hash": self.password_hash
+        }
+        db.users.update_one({"_id": self._id}, {"$set": doc}, upsert=True)
+        return self
+
+    @classmethod
+    def from_doc(cls, doc):
+        if not doc:
+            return None
+        return cls(
+            email=doc.get("email"),
+            password_hash=doc.get("password_hash"),
+            name=doc.get("name", ""),
+            role=doc.get("role", "user"),
+            _id=doc.get("_id")
+        )
+
+    @classmethod
+    def find_by_email(cls, email):
+        db = get_db()
+        doc = db.users.find_one({"email": str(email).strip().lower()})
+        return cls.from_doc(doc)
+
+    @classmethod
+    def find_by_id(cls, user_id):
+        db = get_db()
+        doc = db.users.find_one({"_id": safe_object_id(user_id)})
+        return cls.from_doc(doc)
+
+
+def create_user_doc(email, password, name="", role="user"):
+    u = User(email=email, name=name, role=role)
+    u.set_password(password)
+    u.save()
+    return u
+
+
+def compute_job_status(items):
+    s = {i.get("status") for i in items}
+    if not s:
+        return "queued"
+    if s & {"queued", "processing"}:
+        return "processing" if (s & {"processing"} or len(s) > 1) else "queued"
+    if s == {"cancelled"}:
+        return "cancelled"
+    if "failed" in s:
+        return "failed"
+    return "completed"
+
+
+def job_to_dict(j, with_items=True):
+    if not j:
+        return None
+    created_at = j.get("created_at")
+    if isinstance(created_at, datetime):
+        created_at_str = created_at.isoformat()
+    elif created_at:
+        created_at_str = str(created_at)
+    else:
+        created_at_str = datetime.utcnow().isoformat()
+
+    items = j.get("items", [])
+    copies = int(j.get("copies", 1))
+    total_pages = sum(int(i.get("pages", 1)) for i in items) * copies
+
+    d = {
+        "id": str(j.get("_id")),
+        "printer": j.get("printer", ""),
+        "copies": copies,
+        "paper": j.get("paper", "A4"),
+        "orientation": j.get("orientation", "portrait"),
+        "color": bool(j.get("color", False)),
+        "duplex": bool(j.get("duplex", False)),
+        "status": compute_job_status(items),
+        "created_at": created_at_str,
+        "total_pages": total_pages,
+    }
+    if with_items:
+        formatted_items = []
+        for it in items:
+            fin = it.get("finished_at")
+            if isinstance(fin, datetime):
+                fin_str = fin.isoformat()
+            else:
+                fin_str = str(fin) if fin else None
+            formatted_items.append({
+                "id": str(it.get("id")),
+                "name": it.get("name"),
+                "pages": int(it.get("pages", 1)),
+                "size": int(it.get("size", 0)),
+                "status": it.get("status", "queued"),
+                "error": it.get("error"),
+                "finished_at": fin_str
+            })
+        d["items"] = formatted_items
+    return d

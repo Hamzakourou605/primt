@@ -1,32 +1,50 @@
 from collections import Counter
+from datetime import datetime
 from flask import Blueprint, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from sqlalchemy import func
-from .models import PrintJob, PrintItem
+from .db import get_db
 from .jobs import parse_date
-from . import db
 
 bp = Blueprint("stats", __name__)
 
 @bp.get("/stats")
 @jwt_required()
 def stats():
-    uid = int(get_jwt_identity())
-    q = db.session.query(PrintItem, PrintJob).join(PrintJob).filter(PrintJob.user_id == uid)
-    if (f := parse_date(request.args.get("from"))): q = q.filter(PrintJob.created_at >= f)
-    if (t := parse_date(request.args.get("to"), True)): q = q.filter(PrintJob.created_at < t)
-    rows = q.all()
-    jobs = {j.id: j for _, j in rows}
-    status = Counter(i.status for i, _ in rows)
-    done = [(i, j) for i, j in rows if i.status == "completed"]
+    db = get_db()
+    uid = str(get_jwt_identity())
+    query = {"user_id": uid}
+    if f := parse_date(request.args.get("from")):
+        query.setdefault("created_at", {})["$gte"] = f
+    if t := parse_date(request.args.get("to"), True):
+        query.setdefault("created_at", {})["$lt"] = t
+
+    jobs = list(db.jobs.find(query))
+    status = Counter()
+    done = []
     daily, top = Counter(), Counter()
-    for i, j in done:
-        daily[j.created_at.date().isoformat()] += i.pages * j.copies
-        top[i.name] += 1
+
+    for j in jobs:
+        created_at = j.get("created_at")
+        if isinstance(created_at, str):
+            try:
+                created_at = datetime.fromisoformat(created_at)
+            except Exception:
+                created_at = datetime.utcnow()
+        copies = int(j.get("copies", 1))
+        for i in j.get("items", []):
+            st = i.get("status", "queued")
+            status[st] += 1
+            if st == "completed":
+                done.append((i, j))
+                d_key = created_at.date().isoformat()
+                pages = int(i.get("pages", 1))
+                daily[d_key] += pages * copies
+                top[i.get("name")] += 1
+
     return {
         "total_documents": len(done),
         "total_jobs": len(jobs),
-        "pages_printed": sum(i.pages * j.copies for i, j in done),
+        "pages_printed": sum(int(i.get("pages", 1)) * int(j.get("copies", 1)) for i, j in done),
         "successful": status["completed"],
         "failed": status["failed"],
         "success_rate": round(100 * status["completed"] / max(1, status["completed"] + status["failed"]), 1),

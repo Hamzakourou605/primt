@@ -1,14 +1,13 @@
 import pytest
-from app import create_app, db
-from app.models import User
+from app import create_app
+from app.models import create_user_doc
 from config import TestConfig
 
 @pytest.fixture
 def client():
     app = create_app(TestConfig)
     with app.app_context():
-        db.create_all()
-        u = User(email="a@b.com"); u.set_password("secret123"); db.session.add(u); db.session.commit()
+        create_user_doc(email="a@b.com", password="secret123")
         yield app.test_client()
 
 def auth(c):
@@ -17,7 +16,8 @@ def auth(c):
 
 JOB = {"printer": "HP", "copies": 2, "items": [{"name": "a.pdf", "pages": 3}, {"name": "b.pdf", "pages": 1}]}
 
-def test_health(client): assert client.get("/health").json["status"] == "ok"
+def test_health(client):
+    assert client.get("/health").json["status"] == "ok"
 
 def test_login_errors(client):
     assert client.post("/api/auth/login", json={"email": "bad", "password": "x"}).status_code == 400
