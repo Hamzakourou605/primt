@@ -1,0 +1,7 @@
+@tailwind base; @tailwind components; @tailwind utilities;
+body { @apply bg-surface text-navy antialiased; }
+.card { @apply bg-white rounded-xl shadow-sm border border-line; }
+.btn { @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 h-10 font-semibold text-sm transition disabled:opacity-50; }
+.btn-primary { @apply btn bg-electric text-white hover:bg-electric-dark shadow-md; }
+.btn-ghost { @apply btn bg-soft hover:bg-line text-navy; }
+.input { @apply w-full h-10 rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-electric; }

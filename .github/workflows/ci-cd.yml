@@ -1,0 +1,98 @@
+name: PrintFlow CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  backend-test:
+    name: Backend Tests & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run Pytest
+        run: |
+          cd backend
+          python -m pytest tests -v
+
+  frontend-check:
+    name: Frontend Lint & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package.json
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm install
+
+      - name: Lint Frontend
+        run: |
+          cd frontend
+          npm run lint
+
+      - name: Build Frontend
+        run: |
+          cd frontend
+          npm run build
+
+  deploy-render:
+    name: Deploy to Render
+    needs: [ backend-test, frontend-check ]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy Backend API via Render Deploy Hook
+        if: env.RENDER_API_DEPLOY_HOOK_URL != ''
+        env:
+          RENDER_API_DEPLOY_HOOK_URL: ${{ secrets.RENDER_API_DEPLOY_HOOK_URL }}
+        run: |
+          echo "Triggering Render Backend API deployment..."
+          curl -f -X POST "$RENDER_API_DEPLOY_HOOK_URL"
+          echo "Render Backend API deploy hook triggered successfully."
+
+      - name: Deploy Frontend via Render Deploy Hook
+        if: env.RENDER_FRONTEND_DEPLOY_HOOK_URL != ''
+        env:
+          RENDER_FRONTEND_DEPLOY_HOOK_URL: ${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK_URL }}
+        run: |
+          echo "Triggering Render Frontend deployment..."
+          curl -f -X POST "$RENDER_FRONTEND_DEPLOY_HOOK_URL"
+          echo "Render Frontend deploy hook triggered successfully."
+
+      - name: Notify Blueprint Status
+        run: |
+          echo "=========================================================="
+          echo "CI/CD checks passed successfully!"
+          echo "Repository: https://github.com/Hamzakourou605/primt"
+          echo "If Render Blueprint sync is enabled on Render.com with render.yaml,"
+          echo "Render automatically deploys all services on commit to main."
+          echo "=========================================================="
