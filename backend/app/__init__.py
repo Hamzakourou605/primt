@@ -49,4 +49,13 @@ def create_app(config=None):
         create_user_doc(email, password, name, role)
         print("Utilisateur créé")
 
+    @app.cli.group("db")
+    def db_cli():
+        """Database commands"""
+        pass
+
+    @db_cli.command("upgrade")
+    def db_upgrade():
+        print("MongoDB Atlas: aucune migration SQL requise, étape ignorée.")
+
     return app

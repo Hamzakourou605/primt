@@ -1,6 +1,9 @@
 from pymongo import MongoClient
 import mongomock
 from bson import ObjectId
+import logging
+
+logger = logging.getLogger(__name__)
 
 _db = None
 _client = None
@@ -12,11 +15,18 @@ def init_db(app):
         _db = _client.get_database("printflow_test")
     else:
         uri = app.config.get("MONGO_URI", "mongodb://localhost:27017/printflow")
-        _client = MongoClient(uri)
+        if not (uri.startswith("mongodb://") or uri.startswith("mongodb+srv://")):
+            uri = "mongodb://localhost:27017/printflow"
         try:
-            _db = _client.get_default_database()
-        except Exception:
-            _db = _client["printflow"]
+            _client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+            try:
+                _db = _client.get_default_database()
+            except Exception:
+                _db = _client["printflow"]
+        except Exception as e:
+            logger.warning("Could not initialize MongoDB client: %s, falling back to mock", e)
+            _client = mongomock.MongoClient()
+            _db = _client.get_database("printflow")
 
     # Ensure indexes and seed default admin user
     try:
@@ -33,8 +43,8 @@ def init_db(app):
                 "role": "admin",
                 "password_hash": generate_password_hash("admin123")
             })
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("MongoDB indexing/seeding notice: %s", e)
 
     return _db
 

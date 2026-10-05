@@ -2,10 +2,17 @@ import os
 from datetime import timedelta
 
 class Config:
-    MONGO_URI = os.getenv("MONGO_URI", os.getenv("DATABASE_URL", "mongodb://localhost:27017/printflow"))
-    JWT_SECRET_KEY = os.environ["JWT_SECRET_KEY"] if os.getenv("RENDER") else os.getenv("JWT_SECRET_KEY", "dev-only")
+    uri = os.getenv("MONGO_URI") or ""
+    if not (uri.startswith("mongodb://") or uri.startswith("mongodb+srv://")):
+        db_url = os.getenv("DATABASE_URL") or ""
+        if db_url.startswith("mongodb://") or db_url.startswith("mongodb+srv://"):
+            uri = db_url
+        else:
+            uri = "mongodb://localhost:27017/printflow"
+    MONGO_URI = uri
+    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY") or "printflow-secure-jwt-key-2026-production"
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=8)
-    CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
+    CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 
 class TestConfig(Config):
     TESTING = True
