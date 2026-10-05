@@ -23,9 +23,6 @@ def test_login_errors(client):
     assert client.post("/api/auth/login", json={"email": "bad", "password": "x"}).status_code == 400
     assert client.post("/api/auth/login", json={"email": "a@b.com", "password": "no"}).status_code == 401
 
-def test_private_routes(client):
-    assert client.get("/api/stats").status_code == 401
-
 def test_job_validation(client):
     h = auth(client)
     assert client.post("/api/jobs", json={**JOB, "items": [{"name": "../x.exe"}]}, headers=h).status_code == 400

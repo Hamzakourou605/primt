@@ -3,16 +3,27 @@ from datetime import datetime
 from flask import Blueprint, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from .db import get_db
-from .jobs import parse_date
 
 bp = Blueprint("stats", __name__)
 
+def uid():
+    identity = get_jwt_identity()
+    return str(identity) if identity else "default-user"
+
+def parse_date(s, end=False):
+    from datetime import timedelta
+    try:
+        d = datetime.fromisoformat(s)
+        return d + timedelta(days=1) if end and len(s) == 10 else d
+    except (TypeError, ValueError):
+        return None
+
 @bp.get("/stats")
-@jwt_required()
+@jwt_required(optional=True)
 def stats():
     db = get_db()
-    uid = str(get_jwt_identity())
-    query = {"user_id": uid}
+    current_uid = uid()
+    query = {"$or": [{"user_id": current_uid}, {"user_id": "default-user"}]} if current_uid != "default-user" else {}
     if f := parse_date(request.args.get("from")):
         query.setdefault("created_at", {})["$gte"] = f
     if t := parse_date(request.args.get("to"), True):

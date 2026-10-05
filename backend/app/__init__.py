@@ -23,7 +23,14 @@ def create_app(config=None):
 
     @app.get("/health")
     def health():
-        return {"status": "ok"}
+        res = {"status": "ok", "database": "unknown"}
+        try:
+            db = get_db()
+            db.command("ping")
+            res["database"] = "connected"
+        except Exception as e:
+            res["database"] = f"connection_failed: {str(e)}"
+        return res
 
     @app.errorhandler(HTTPException)
     def http_err(e):
@@ -32,7 +39,15 @@ def create_app(config=None):
     @app.errorhandler(Exception)
     def any_err(e):
         app.logger.exception(e)
-        return jsonify(error="Erreur interne"), 500
+        err_msg = str(e)
+        err_type = type(e).__name__
+        if "ServerSelectionTimeoutError" in err_type or "timed out" in err_msg.lower():
+            return jsonify(error="Erreur de connexion à MongoDB Atlas : Délai d'attente dépassé. Veuillez autoriser 0.0.0.0/0 dans l'onglet 'Network Access' de MongoDB Atlas."), 500
+        if "OperationFailure" in err_type or "authentication failed" in err_msg.lower():
+            return jsonify(error="Erreur d'authentification MongoDB : Mot de passe ou nom d'utilisateur incorrect dans la variable MONGO_URI sur Render."), 500
+        if "ConfigurationError" in err_type or "InvalidURI" in err_type:
+            return jsonify(error=f"Format du lien MONGO_URI invalide : {err_msg}"), 500
+        return jsonify(error=f"Erreur interne : {err_msg}"), 500
 
     @jwt.unauthorized_loader
     @jwt.invalid_token_loader

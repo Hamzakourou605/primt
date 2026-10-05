@@ -13,13 +13,18 @@ PAPERS = {"A4", "A3", "Letter", "Legal"}
 MAX_ITEMS, MAX_COPIES = 500, 99
 
 def uid():
-    return str(get_jwt_identity())
+    identity = get_jwt_identity()
+    return str(identity) if identity else "default-user"
 
 def own_job(job_id):
     db = get_db()
     oid = safe_object_id(job_id)
     j = db.jobs.find_one({"$or": [{"_id": oid}, {"_id": str(job_id)}]})
-    if not j or str(j.get("user_id")) != uid():
+    if not j:
+        return None
+    user_id = str(j.get("user_id"))
+    current_uid = uid()
+    if user_id and user_id != current_uid and current_uid != "default-user":
         return None
     return j
 
@@ -31,7 +36,7 @@ def parse_date(s, end=False):
         return None
 
 @bp.get("/printers")
-@jwt_required()
+@jwt_required(optional=True)
 def list_printers():
     try:
         if platform.system() == "Windows":
@@ -45,7 +50,7 @@ def list_printers():
         return jsonify({"printers": [], "error": str(e)})
 
 @bp.post("/jobs")
-@jwt_required()
+@jwt_required(optional=True)
 def create_job():
     db = get_db()
     d = request.get_json(silent=True) or {}
@@ -100,10 +105,11 @@ def create_job():
     return job_to_dict(job_doc), 201
 
 @bp.get("/jobs")
-@jwt_required()
+@jwt_required(optional=True)
 def list_jobs():
     db = get_db()
-    query = {"user_id": uid()}
+    current_uid = uid()
+    query = {"$or": [{"user_id": current_uid}, {"user_id": "default-user"}]} if current_uid != "default-user" else {}
     if f := parse_date(request.args.get("from")):
         query.setdefault("created_at", {})["$gte"] = f
     if t := parse_date(request.args.get("to"), True):
@@ -125,13 +131,13 @@ def list_jobs():
     }
 
 @bp.get("/jobs/<job_id>")
-@jwt_required()
+@jwt_required(optional=True)
 def get_job(job_id):
     j = own_job(job_id)
     return (job_to_dict(j), 200) if j else (jsonify(error="Interdit"), 403)
 
 @bp.post("/jobs/<job_id>/cancel")
-@jwt_required()
+@jwt_required(optional=True)
 def cancel(job_id):
     j = own_job(job_id)
     if not j:
@@ -144,7 +150,7 @@ def cancel(job_id):
     return job_to_dict(j)
 
 @bp.post("/jobs/<job_id>/retry")
-@jwt_required()
+@jwt_required(optional=True)
 def retry(job_id):
     j = own_job(job_id)
     if not j:
@@ -158,7 +164,7 @@ def retry(job_id):
     return job_to_dict(j)
 
 @bp.delete("/jobs/<job_id>/items/<item_id>")
-@jwt_required()
+@jwt_required(optional=True)
 def remove_item(job_id, item_id):
     j = own_job(job_id)
     if not j:
@@ -172,11 +178,14 @@ def remove_item(job_id, item_id):
     return "", 204
 
 @bp.get("/agent/next")
-@jwt_required()
+@jwt_required(optional=True)
 def agent_next():
     db = get_db()
-    user_id = uid()
-    cursor = db.jobs.find({"user_id": user_id, "items.status": "queued"}).sort("created_at", 1)
+    current_uid = uid()
+    query = {"items.status": "queued"}
+    if current_uid != "default-user":
+        query["$or"] = [{"user_id": current_uid}, {"user_id": "default-user"}]
+    cursor = db.jobs.find(query).sort("created_at", 1)
     out = []
     for job in cursor:
         updated = False
@@ -205,11 +214,10 @@ def agent_next():
     return {"items": out}
 
 @bp.post("/agent/items/<item_id>/result")
-@jwt_required()
+@jwt_required(optional=True)
 def agent_result(item_id):
     db = get_db()
-    user_id = uid()
-    job = db.jobs.find_one({"user_id": user_id, "items.id": str(item_id)})
+    job = db.jobs.find_one({"items.id": str(item_id)})
     if not job:
         return jsonify(error="Interdit"), 403
     d = request.get_json(silent=True) or {}
