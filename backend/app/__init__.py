@@ -23,14 +23,9 @@ def create_app(config=None):
 
     @app.get("/health")
     def health():
-        res = {"status": "ok", "database": "unknown"}
-        try:
-            db = get_db()
-            db.command("ping")
-            res["database"] = "connected"
-        except Exception as e:
-            res["database"] = f"connection_failed: {str(e)}"
-        return res
+        from .db import get_db_info
+        info = get_db_info()
+        return {"status": "ok", "database": info["status"], "detail": info["error"]}
 
     @app.errorhandler(HTTPException)
     def http_err(e):
