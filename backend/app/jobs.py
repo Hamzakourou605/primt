@@ -38,16 +38,61 @@ def parse_date(s, end=False):
 @bp.get("/printers")
 @jwt_required(optional=True)
 def list_printers():
+    printers = []
+    default_printer = ""
     try:
         if platform.system() == "Windows":
-            res = subprocess.run(["powershell", "-Command", "Get-Printer | Select-Object -ExpandProperty Name"], capture_output=True, text=True)
-            printers = [p.strip() for p in res.stdout.strip().split('\n') if p.strip()]
+            cmd = "Get-CimInstance Win32_Printer | Select-Object Name, Default | ConvertTo-Json -Compress"
+            res = subprocess.run(["powershell", "-NoProfile", "-Command", cmd], capture_output=True, text=True, timeout=6)
+            import json
+            raw = res.stdout.strip()
+            if raw:
+                try:
+                    data = json.loads(raw)
+                    if isinstance(data, dict):
+                        data = [data]
+                    for item in data:
+                        p_name = str(item.get("Name", "")).strip()
+                        if p_name:
+                            printers.append(p_name)
+                            if item.get("Default"):
+                                default_printer = p_name
+                except Exception:
+                    pass
+            if not printers:
+                res2 = subprocess.run(["powershell", "-NoProfile", "-Command", "Get-Printer | Select-Object -ExpandProperty Name"], capture_output=True, text=True, timeout=5)
+                printers = [p.strip() for p in res2.stdout.strip().split('\n') if p.strip()]
         else:
-            res = subprocess.run(["lpstat", "-p"], capture_output=True, text=True)
+            res = subprocess.run(["lpstat", "-p"], capture_output=True, text=True, timeout=5)
             printers = [line.split(' ')[1] for line in res.stdout.split('\n') if line.startswith("printer ")]
-        return jsonify({"printers": printers})
-    except Exception as e:
-        return jsonify({"printers": [], "error": str(e)})
+    except Exception:
+        pass
+
+    presets = [
+        "Microsoft Print to PDF",
+        "Imprimante par défaut Windows",
+        "HP LaserJet / DeskJet Pro",
+        "Canon PIXMA / i-SENSYS",
+        "Brother HL-Series",
+        "Epson EcoTank",
+        "Enregistrer en PDF local"
+    ]
+    seen = set()
+    ordered = []
+    for p in printers:
+        if p and p not in seen:
+            seen.add(p)
+            ordered.append(p)
+    for p in presets:
+        if p not in seen:
+            seen.add(p)
+            ordered.append(p)
+
+    return jsonify({
+        "printers": ordered,
+        "default": default_printer or (ordered[0] if ordered else "Microsoft Print to PDF"),
+        "detected_count": len(printers)
+    })
 
 @bp.post("/jobs")
 @jwt_required(optional=True)
