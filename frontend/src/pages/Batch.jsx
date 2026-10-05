@@ -14,6 +14,7 @@ export default function Batch() {
   const [files, setFiles] = useState([]); const [invalid, setInvalid] = useState([]); const [busy, setBusy] = useState(false);
   const [s, setS] = useState({ printer: "", copies: 1, paper: "A4", orientation: "portrait", color: false, duplex: false });
   const [job, setJob] = useState(null); const [err, setErr] = useState("");
+  const [printers, setPrinters] = useState([]);
   const add = async (list) => {
     setBusy(true); const ok = [...files], bad = [];
     for (const f of list) {
@@ -34,6 +35,12 @@ export default function Batch() {
     const t = setInterval(() => api.get(`/jobs/${job.id}`).then((r) => setJob(r.data)), 2000);
     return () => clearInterval(t);
   }, [job]);
+  useEffect(() => {
+    api.get("/printers").then(r => {
+      setPrinters(r.data.printers || []);
+      if (r.data.printers?.length && !s.printer) setS(prev => ({ ...prev, printer: r.data.printers[0] }));
+    }).catch(console.error);
+  }, []);
   const act = (a) => api.post(`/jobs/${job.id}/${a}`).then((r) => setJob(r.data));
   const set = (k, v) => setS({ ...s, [k]: v });
   const pages = files.reduce((a, f) => a + f.pages, 0);
@@ -60,7 +67,13 @@ export default function Batch() {
             <button className="btn-ghost" onClick={() => act("retry")}><RotateCcw size={16} />Relancer les échecs</button></div></div>}
       </div>
       <div className="card p-4 space-y-3 h-fit"><h3 className="font-semibold">Paramètres</h3>
-        <input className="input" placeholder="Nom de l'imprimante" value={s.printer} onChange={(e) => set("printer", e.target.value)} />
+        {printers.length > 0 ? (
+          <select className="input" value={s.printer} onChange={(e) => set("printer", e.target.value)}>
+            {printers.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        ) : (
+          <input className="input" placeholder="Recherche imprimantes locales..." value={s.printer} onChange={(e) => set("printer", e.target.value)} />
+        )}
         <select className="input" value={s.paper} onChange={(e) => set("paper", e.target.value)}>{["A4", "A3", "Letter", "Legal"].map((p) => <option key={p}>{p}</option>)}</select>
         <select className="input" value={s.orientation} onChange={(e) => set("orientation", e.target.value)}><option value="portrait">Portrait</option><option value="landscape">Paysage</option></select>
         <label className="flex gap-2 text-sm"><input type="checkbox" checked={s.color} onChange={(e) => set("color", e.target.checked)} />Couleur</label>

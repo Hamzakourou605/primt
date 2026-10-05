@@ -2,6 +2,8 @@ from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from .models import PrintJob, PrintItem
+import subprocess
+import platform
 from . import db
 
 bp = Blueprint("jobs", __name__)
@@ -20,6 +22,20 @@ def parse_date(s, end=False):
         d = datetime.fromisoformat(s)
         return d + timedelta(days=1) if end and len(s) == 10 else d
     except (TypeError, ValueError): return None
+
+@bp.get("/printers")
+@jwt_required()
+def list_printers():
+    try:
+        if platform.system() == "Windows":
+            res = subprocess.run(["powershell", "-Command", "Get-Printer | Select-Object -ExpandProperty Name"], capture_output=True, text=True)
+            printers = [p.strip() for p in res.stdout.strip().split('\n') if p.strip()]
+        else:
+            res = subprocess.run(["lpstat", "-p"], capture_output=True, text=True)
+            printers = [line.split(' ')[1] for line in res.stdout.split('\n') if line.startswith("printer ")]
+        return jsonify({"printers": printers})
+    except Exception as e:
+        return jsonify({"printers": [], "error": str(e)})
 
 @bp.post("/jobs")
 @jwt_required()
